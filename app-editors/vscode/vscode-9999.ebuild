@@ -18,18 +18,18 @@ SRC_URI="
 
 REPO="https://github.com/microsoft/vscode"
 #CODE_COMMIT_ID="ae245c9b1f06e79cec4829f8cd1555206b0ec8f2"
-IUSE="api-proposals badge-providers electron-27 electron-28 electron-29 electron-31 electron-32 electron-33 electron-34 electron-35 openvsx reh reh-web substitute-urls temp-fix"
+IUSE="api-proposals badge-providers electron-27 electron-28 electron-29 electron-31 electron-32 electron-33 electron-30 electron-35 electron-36 openvsx reh reh-web substitute-urls temp-fix"
 
 if [[ ${PV} = *9999* ]]; then
 	inherit git-r3
 	EGIT_REPO_URI="${REPO}.git"
 	DOWNLOAD=""
 	IUSE+=" +build-online"
-	ELECTRON_SLOT_DEFAULT="30"
+	ELECTRON_SLOT_DEFAULT="34"
 else
-	IUSE+=" build-online"
-	ELECTRON_SLOT_DEFAULT="30"
-	KEYWORDS="amd64 ~arm64 ~ppc64 ~x86"
+	IUSE+=" +build-online"
+	ELECTRON_SLOT_DEFAULT="34"
+	KEYWORDS="~amd64 ~arm64 ~ppc64 ~x86"
 	DOWNLOAD="${REPO}/archive/"
 	if [ -z "$CODE_COMMIT_ID" ]; then
 		DOWNLOAD+="${PV}.tar.gz -> ${P}.tar.gz"
@@ -57,18 +57,20 @@ COMMON_DEPEND="
 	electron-31? ( dev-util/electron:31 )
 	electron-32? ( dev-util/electron:32 )
 	electron-33? ( dev-util/electron:33 )
-	electron-34? ( dev-util/electron:34 )
+	electron-30? ( dev-util/electron:30 )
 	electron-35? ( dev-util/electron:35 )
+	electron-36? ( dev-util/electron:36 )
 	!electron-27? (
 	!electron-28? (
 	!electron-29? (
 	!electron-31? (
 	!electron-32? (
 	!electron-33? (
-	!electron-34? (
+	!electron-30? (
 	!electron-35? (
+	!electron-36? (
 		dev-util/electron:${ELECTRON_SLOT_DEFAULT}
-	) ) ) ) ) ) ) )
+	) ) ) ) ) ) ) ) )
 "
 
 #TODO: oniguruma?
@@ -85,11 +87,20 @@ BDEPEND="
 		dev-python/setuptools[${PYTHON_USEDEP}]
 	')
 	!temp-fix? ( net-libs/nodejs )
-	sys-apps/yarn
 "
 
 python_check_deps() {
         python_has_version "dev-python/setuptools[${PYTHON_USEDEP}]"
+}
+
+pkg_pretend() {
+	if ! use build-online; then
+		ewarn
+		ewarn "Offline build is not implemented yet"
+		ewarn "Subscribe to #377 to stay informed"
+		ewarn
+		[[ -z "${NODIE}" ]] && die "The build will fail!"
+	fi
 }
 
 src_unpack() {
@@ -105,10 +116,12 @@ src_unpack() {
 		export ELECTRON_SLOT=32
 	elif use electron-33; then
 		export ELECTRON_SLOT=33
-	elif use electron-34; then
-		export ELECTRON_SLOT=34
+	elif use electron-30; then
+		export ELECTRON_SLOT=30
 	elif use electron-35; then
 		export ELECTRON_SLOT=35
+	elif use electron-36; then
+		export ELECTRON_SLOT=36
 	else
 		export ELECTRON_SLOT=$ELECTRON_SLOT_DEFAULT
 	fi
@@ -173,8 +186,8 @@ src_prepare() {
 	sed -i '/test\/monaco/d' build/npm/dirs.js || die
 	sed -i '/vscode-selfhost-test-provider/d' build/npm/dirs.js || die
 
-	einfo "Editing build/gulpfile.extensions.js"
-	sed -i '/bundle-marketplace-extensions-build/d' build/gulpfile.extensions.js || die
+	# einfo "Editing build/gulpfile.extensions.js"
+	# sed -i '/bundle-marketplace-extensions-build/d' build/gulpfile.extensions.js || die
 
 	einfo "Editing build/gulpfile.vscode.js"
 	#sed -i 's/ffmpegChromium: true/ffmpegChromium: false/' build/gulpfile.vscode.js || die
@@ -225,6 +238,10 @@ src_prepare() {
 		grep -rl --exclude-dir=.git -E $TELEMETRY_URLS . | xargs sed -i -E $REPLACEMENT
 	eend $? || die
 	fi
+
+	einfo "Disabling signature verification for extensions"
+	einfo "as it depends on a package from a hidden repository"
+	patch -p1 -i "${FILESDIR}/disable-signature-verification.patch" || die
 }
 
 src_configure() {
@@ -255,7 +272,7 @@ src_configure() {
 	# fi
 
 	#TODO: temp fix
-	if use electron-32 || use electron-33 || use electron-34 || use electron-35; then
+	if use electron-32 || use electron-33 || use electron-35 || use electron-36; then
 		# CPPFLAGS="${CPPFLAGS} -std=c++20";
 		use build-online || eerror "build-online should be enabled for node-addon-api substitution to work" || die;
 		sed -i 's$"resolutions": {$"resolutions": {"node-addon-api": "^7.1.0",$' package.json || die;
@@ -281,14 +298,15 @@ src_configure() {
 	#! ^^^^^^ mongodb-js/kerberos fixed in main (> 2.1.0)
 	export ELECTRON_SKIP_BINARY_DOWNLOAD=1
 	export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+	npm config set update-notifier false || die
 	# echo "$PATH"
-	yarn config set disable-self-update-check true || die
-	yarn config set nodedir /usr/include/electron-${ELECTRON_SLOT}/node || die
-	if ! use build-online; then
-		ONLINE_OFFLINE="--offline"
-		yarn config set yarn-offline-mirror "${DISTDIR}" || die
-	fi
-	yarn install --frozen-lockfile ${ONLINE_OFFLINE} \
+	# yarn config set disable-self-update-check true || die
+	# yarn config set nodedir /usr/include/electron-${ELECTRON_SLOT}/node || die
+	# if ! use build-online; then
+	# 	ONLINE_OFFLINE="--offline"
+	# 	yarn config set yarn-offline-mirror "${DISTDIR}" || die
+	# fi
+	npm install --frozen-lockfile ${ONLINE_OFFLINE} \
 		--arch=${VSCODE_ARCH} --no-progress || die
 	# --ignore-optional
 	# --ignore-engines
@@ -349,27 +367,27 @@ src_compile() {
 	export NODE_OPTIONS="--max-old-space-size=12192 --heapsnapshot-near-heap-limit=5"
 
 	if use temp-fix; then
-	node node_modules/gulp/bin/gulp.js vscode-linux-${VSCODE_ARCH}-min || die
+	node --optimize_for_size node_modules/gulp/bin/gulp.js vscode-linux-${VSCODE_ARCH}-min || die
 	else
 	# Real nodejs needed (/usr/bin/node). See https://github.com/microsoft/vscode-l10n/issues/104
-	/usr/bin/node node_modules/gulp/bin/gulp.js vscode-linux-${VSCODE_ARCH}-min || die
+	/usr/bin/node --optimize_for_size node_modules/gulp/bin/gulp.js vscode-linux-${VSCODE_ARCH}-min || die
 	fi
 
 	#TODO: make reh use the same node at runtime as main vscode
 	if use reh; then
 		if use temp-fix; then
-		node node_modules/gulp/bin/gulp.js vscode-reh-linux-${VSCODE_ARCH}-min || die
+		node --optimize_for_size node_modules/gulp/bin/gulp.js vscode-reh-linux-${VSCODE_ARCH}-min || die
 		else
 		# Real nodejs needed (/usr/bin/node). See https://github.com/microsoft/vscode-l10n/issues/104
-		/usr/bin/node node_modules/gulp/bin/gulp.js vscode-reh-linux-${VSCODE_ARCH}-min || die
+		/usr/bin/node --optimize_for_size node_modules/gulp/bin/gulp.js vscode-reh-linux-${VSCODE_ARCH}-min || die
 		fi
 	fi
 	if use reh-web; then
 		if use temp-fix; then
-		node node_modules/gulp/bin/gulp.js vscode-reh-web-linux-${VSCODE_ARCH}-min || die
+		node --optimize_for_size node_modules/gulp/bin/gulp.js vscode-reh-web-linux-${VSCODE_ARCH}-min || die
 		else
 		# Real nodejs needed (/usr/bin/node). See https://github.com/microsoft/vscode-l10n/issues/104
-		/usr/bin/node node_modules/gulp/bin/gulp.js vscode-reh-web-linux-${VSCODE_ARCH}-min || die
+		/usr/bin/node --optimize_for_size node_modules/gulp/bin/gulp.js vscode-reh-web-linux-${VSCODE_ARCH}-min || die
 		fi
 	fi
 
@@ -411,8 +429,10 @@ src_install() {
 	doins -r "${WORKDIR}"/VSCode-linux-${VSCODE_ARCH}/out
 	doins -r "${WORKDIR}"/VSCode-linux-${VSCODE_ARCH}/resources
 	doins "${WORKDIR}"/VSCode-linux-${VSCODE_ARCH}/*.json
-	doins "${WORKDIR}"/VSCode-linux-${VSCODE_ARCH}/node_modules.asar
-	doins -r "${WORKDIR}"/VSCode-linux-${VSCODE_ARCH}/node_modules.asar.unpacked
+	#TODO why no asar?
+	# doins "${WORKDIR}"/VSCode-linux-${VSCODE_ARCH}/node_modules.asar
+	# doins -r "${WORKDIR}"/VSCode-linux-${VSCODE_ARCH}/node_modules.asar.unpacked
+	doins -r "${WORKDIR}"/VSCode-linux-${VSCODE_ARCH}/node_modules
 	fperms +x ${VSCODE_HOME}/out/vs/base/node/cpuUsage.sh
 	# fperms +x ${VSCODE_HOME}/node_modules.asar.unpacked/node-pty/build/Release/spawn-helper
 
@@ -454,11 +474,11 @@ pkg_postinst() {
 		ewarn
 	fi
 
-	elog
-	elog "Normally vscode ships some builtin extensions, but they are omitted here"
-	elog "Consult product.json for a list if you want to install them manually"
-	elog "ms-vscode.references-view is one of them, for example"
-	elog
+	# elog
+	# elog "Normally vscode ships some builtin extensions, but they are omitted here"
+	# elog "Consult product.json for a list if you want to install them manually"
+	# elog "ms-vscode.references-view is one of them, for example"
+	# elog
 
 	xdg_icon_cache_update
 	xdg_desktop_database_update
